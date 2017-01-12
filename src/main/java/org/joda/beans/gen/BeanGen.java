@@ -18,6 +18,9 @@ package org.joda.beans.gen;
 import java.beans.ConstructorProperties;
 import java.beans.PropertyChangeSupport;
 import java.io.File;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -39,6 +42,7 @@ import org.joda.beans.impl.direct.DirectBeanBuilder;
 import org.joda.beans.impl.direct.DirectFieldsBeanBuilder;
 import org.joda.beans.impl.direct.DirectMetaBean;
 import org.joda.beans.impl.direct.DirectMetaPropertyMap;
+import org.joda.beans.impl.handle.HandleMetaBean;
 import org.joda.beans.impl.light.LightMetaBean;
 
 /**
@@ -317,7 +321,8 @@ class BeanGen {
 
     private void generateArgBasedConstructor() {
         if (data.getConstructorStyle() == CONSTRUCTOR_BY_ARGS && data.getImmutableConstructor() == CONSTRUCTOR_NONE && 
-                ((data.isMutable() && (data.isBuilderScopeVisible() || data.isBeanStyleLight())) || data.isImmutable())) {
+                ((data.isMutable() && (data.isBuilderScopeVisible() || data.isBeanStyleLight() || data.isBeanStyleHandle())) ||
+                data.isImmutable())) {
             String scope = data.getEffectiveConstructorScope();
             boolean generateAnnotation = data.isConstructorPropertiesAnnotation();
             boolean generateJavadoc = !"private ".equals(scope);
@@ -361,7 +366,7 @@ class BeanGen {
                     insertRegion.add("\t\t\t" + prop.getBuilderType() + " " + prop.getData().getPropertyName() + (i < nonDerived.size() - 1 ? "," : ") {"));
                 }
                 // validate (mutable light beans call setters which validate)
-                if (!(data.isMutable() && data.isBeanStyleLight())) {
+                if (!(data.isMutable() && (data.isBeanStyleLight() || data.isBeanStyleHandle()))) {
                     for (PropertyGen prop : properties) {
                         if (prop.getData().isValidated()) {
                             insertRegion.add("\t\t" + prop.getData().getValidationMethodName() +
@@ -373,7 +378,7 @@ class BeanGen {
                 // assign
                 for (int i = 0; i < nonDerived.size(); i++) {
                     PropertyGen prop = nonDerived.get(i);
-                    if (data.isMutable() && data.isBeanStyleLight()) {
+                    if (data.isMutable() && (data.isBeanStyleLight() || data.isBeanStyleHandle())) {
                         String generateSetInvoke = prop.getData().getSetterGen().generateSetInvoke(
                                 prop.getData(), prop.getData().getPropertyName());
                         insertRegion.add("\t\t" + generateSetInvoke + ";");
@@ -392,13 +397,53 @@ class BeanGen {
 
     //-----------------------------------------------------------------------
     private void generateMeta() {
-        if (data.isBeanStyleLight()) {
+        if (data.isBeanStyleLight() || data.isBeanStyleHandle()) {
             data.ensureImport(MetaBean.class);
-            data.ensureImport(LightMetaBean.class);
-            insertRegion.add("\t/**");
-            insertRegion.add("\t * The meta-bean for {@code " + data.getTypeRaw() + "}.");
-            insertRegion.add("\t */");
-            insertRegion.add("\tprivate static MetaBean META_BEAN = LightMetaBean.of(" + data.getTypeRaw() + ".class);");
+            if (data.isBeanStyleLight()) {
+                data.ensureImport(LightMetaBean.class);
+                insertRegion.add("\t/**");
+                insertRegion.add("\t * The meta-bean for {@code " + data.getTypeRaw() + "}.");
+                insertRegion.add("\t */");
+                insertRegion.add("\tprivate static final MetaBean META_BEAN = LightMetaBean.of(" + data.getTypeRaw() + ".class);");
+            } else {
+                data.ensureImport(HandleMetaBean.class);
+                data.ensureImport(MethodHandle.class);
+                data.ensureImport(MethodHandles.class);
+                data.ensureImport(MethodType.class);
+                insertRegion.add("\t/**");
+                insertRegion.add("\t * The constructor method handle.");
+                insertRegion.add("\t */");
+                insertRegion.add("\tprivate static final MethodHandle CONSTRUCTOR_HANDLE =");
+                insertRegion.add("\t\t\tHandleMetaBean.findConstructorHandle(" +
+                    data.getTypeRaw() + ".class, MethodHandles.lookup());");
+                
+//                insertRegion.add("\tprivate static final MethodHandle CONSTRUCTOR_HANDLE;");
+//                insertRegion.add("\tstatic {");
+//                insertRegion.add("\t\ttry {");
+//                insertRegion.add("\t\t\tCONSTRUCTOR_HANDLE = MethodHandles.lookup().findConstructor(");
+//                insertRegion.add("\t\t\t\t\t" + data.getTypeRaw() + ".class,");
+//                insertRegion.add("\t\t\t\t\tMethodType.methodType(");
+//                List<PropertyGen> nonDerived = nonDerivedProperties();
+//                if (nonDerived.size() == 0) {
+//                    insertRegion.add("\t\t\t\t\t\t\tvoid.class));");
+//                } else {
+//                    insertRegion.add("\t\t\t\t\t\t\tvoid.class,");
+//                    for (int i = 0; i < nonDerived.size(); i++) {
+//                        PropertyGen prop = nonDerived.get(i);
+//                        insertRegion.add("\t\t\t\t\t\t\t" + prop.getData().getBuilderType() + ".class" +
+//                            (i == nonDerived.size() - 1 ? "));" : ","));
+//                    }
+//                }
+//                insertRegion.add("\t\t} catch (NoSuchMethodException | IllegalAccessException ex) {");
+//                insertRegion.add("\t\t\tthrow new IllegalStateException(\"Unexpected error: \" + ex.getMessage(), ex);");
+//                insertRegion.add("\t\t}");
+//                insertRegion.add("\t}");
+                insertRegion.add("\t/**");
+                insertRegion.add("\t * The meta-bean for {@code " + data.getTypeRaw() + "}.");
+                insertRegion.add("\t */");
+                insertRegion.add("\tprivate static final MetaBean META_BEAN =");
+                insertRegion.add("\t\t\tHandleMetaBean.of(" + data.getTypeRaw() + ".class, MethodHandles.lookup(), CONSTRUCTOR_HANDLE);");
+            }
             insertRegion.add("");
             insertRegion.add("\t/**");
             insertRegion.add("\t * The meta-bean for {@code " + data.getTypeRaw() + "}.");
@@ -527,7 +572,7 @@ class BeanGen {
             data.ensureImport(MetaBean.class);
             insertRegion.add("\t@Override");
             insertRegion.add("\tpublic MetaBean metaBean() {");
-            if (data.isBeanStyleLight()) {
+            if (data.isBeanStyleLight() || data.isBeanStyleHandle()) {
                 insertRegion.add("\t\treturn META_BEAN;");
             } else {
                 insertRegion.add("\t\treturn " + data.getTypeRaw() + ".Meta.INSTANCE;");
@@ -802,7 +847,7 @@ class BeanGen {
 
     //-----------------------------------------------------------------------
     private void generateMetaClass() {
-        if (data.isBeanStyleLight()) {
+        if (data.isBeanStyleLight() || data.isBeanStyleHandle()) {
             return;
         }
         generateSeparator();
@@ -1045,7 +1090,7 @@ class BeanGen {
 
     //-----------------------------------------------------------------------
     private void generateBuilderClass() {
-        if ((data.isMutable() && data.isBuilderScopeVisible() == false) || data.isBeanStyleLight()) {
+        if ((data.isMutable() && data.isBuilderScopeVisible() == false) || data.isBeanStyleLight() || data.isBeanStyleHandle()) {
             return;
         }
         List<PropertyGen> nonDerived = nonDerivedProperties();

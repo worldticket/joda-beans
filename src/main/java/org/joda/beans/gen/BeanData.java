@@ -165,7 +165,7 @@ class BeanData {
      */
     public boolean isBeanStyleValid() {
         return "full".equals(beanStyle) || "smart".equals(beanStyle) ||
-                "minimal".equals(beanStyle) || "light".equals(beanStyle);
+                "minimal".equals(beanStyle) || "light".equals(beanStyle) || "handle".equals(beanStyle);
     }
 
     /**
@@ -174,6 +174,14 @@ class BeanData {
      */
     public boolean isBeanStyleLight() {
         return "light".equals(beanStyle);
+    }
+
+    /**
+     * Is the bean style indicating that method handles should be used.
+     * @return the flag
+     */
+    public boolean isBeanStyleHandle() {
+        return "handle".equals(beanStyle);
     }
 
     /**
@@ -245,7 +253,7 @@ class BeanData {
      * @return the scope
      */
     public boolean isMetaScopePrivate() {
-        return "private".equals(beanMetaScope) || isBeanStyleLight();
+        return "private".equals(beanMetaScope) || isBeanStyleLight() || isBeanStyleHandle();
     }
 
     //-----------------------------------------------------------------------
@@ -294,7 +302,7 @@ class BeanData {
      */
     public boolean isEffectiveBuilderScopeVisible() {
         return ("smart".equals(beanBuilderScope) || "public".equals(beanBuilderScope) || "package".equals(beanBuilderScope)) &&
-                !isBeanStyleLight();
+                !isBeanStyleLight() && !isBeanStyleHandle();
     }
 
     /**

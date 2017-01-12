@@ -1,5 +1,5 @@
 /*
- *  Copyright 2001-2016 Stephen Colebourne
+ *  Copyright 2001-2017 Stephen Colebourne
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -13,11 +13,13 @@
  *  See the License for the specific language governing permissions and
  *  limitations under the License.
  */
-package org.joda.beans.impl.light;
+package org.joda.beans.impl.handle;
 
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
@@ -36,22 +38,23 @@ import org.joda.beans.PropertyMap;
 import org.joda.beans.impl.BasicPropertyMap;
 
 /**
- * A light meta-bean implementation that operates using reflection.
+ * A meta-bean implementation that operates using method handles.
  * <p>
  * The properties are found using the {@link PropertyDefinition} annotation.
+ * Only immutable beans are supported.
  * There must be a constructor matching the property definitions (arguments of same order and types).
  * 
  * @author Stephen Colebourne
  * @param <T>  the type of the bean
  */
-public final class LightMetaBean<T extends Bean> implements MetaBean {
+public final class HandleMetaBean<T extends Bean> implements MetaBean {
 
     /** The bean type. */
     private final Class<? extends Bean> beanType;
     /** The meta-property instances of the bean. */
     private final Map<String, MetaProperty<?>> metaPropertyMap;
     /** The constructor to use. */
-    private final Constructor<T> constructor;
+    private final MethodHandle constructor;
     /** The construction data array. */
     private final Object[] constructionData;
 
@@ -63,10 +66,14 @@ public final class LightMetaBean<T extends Bean> implements MetaBean {
      * 
      * @param <B>  the type of the bean
      * @param beanClass  the bean class, not null
+     * @param lookup  the method handle lookup, not null
      * @return the meta-bean, not null
      */
-    public static <B extends Bean> LightMetaBean<B> of(Class<B> beanClass) {
-        return new LightMetaBean<B>(beanClass);
+    public static <B extends Bean> HandleMetaBean<B> of(
+            Class<B> beanClass,
+            MethodHandles.Lookup lookup,
+            MethodHandle constructorHandle) {
+        return new HandleMetaBean<>(beanClass, lookup, constructorHandle);
     }
 
     /**
@@ -74,21 +81,23 @@ public final class LightMetaBean<T extends Bean> implements MetaBean {
      * 
      * @param beanType  the bean type, not null
      */
-    private LightMetaBean(Class<T> beanType) {
+    private HandleMetaBean(Class<T> beanType, MethodHandles.Lookup lookup, MethodHandle constructorHandle) {
         if (beanType == null) {
             throw new NullPointerException("Bean class must not be null");
         }
+        if (lookup == null) {
+            throw new NullPointerException("Lookup must not be null");
+        }
         this.beanType = beanType;
-        Map<String, MetaProperty<?>> map = new HashMap<String, MetaProperty<?>>();
+        Map<String, MetaProperty<?>> map = new HashMap<>();
         Field[] fields = beanType.getDeclaredFields();
-        List<Class<?>> propertyTypes = new ArrayList<Class<?>>();
+        List<Class<?>> propertyTypes = new ArrayList<>();
         for (Field field : fields) {
             if (!Modifier.isStatic(field.getModifiers()) && field.getAnnotation(PropertyDefinition.class) != null) {
                 PropertyDefinition pdef = field.getAnnotation(PropertyDefinition.class);
                 String name = field.getName();
-                if (pdef.get().equals("field")) {
-                    field.setAccessible(true);
-                    map.put(name, LightMetaProperty.of(this, field, name, propertyTypes.size()));
+                if (pdef.get().equals("field") || pdef.get().equals("optional")) {
+                    map.put(name, HandleMetaProperty.of(this, field, lookup, name, propertyTypes.size()));
                     propertyTypes.add(field.getType());
                 } else if (!pdef.get().equals("")) {
                     String getterName = "get" + name.substring(0, 1).toUpperCase() + name.substring(1);
@@ -103,14 +112,21 @@ public final class LightMetaBean<T extends Bean> implements MetaBean {
                                 "Unable to find property getter: " + beanType.getSimpleName() + "." + getterName + "()");
                         }
                     }
-                    method.setAccessible(true);
-                    map.put(name, LightMetaProperty.of(this, field, method, name, propertyTypes.size()));
+                    map.put(name, HandleMetaProperty.of(this, field, method, lookup, name, propertyTypes.size()));
                     propertyTypes.add(field.getType());
                 }
             }
         }
         this.metaPropertyMap = Collections.unmodifiableMap(map);
-        this.constructor = findConstructor(beanType, propertyTypes);
+        Constructor<T> constructor = findConstructor(beanType, propertyTypes);
+        this.constructor = constructorHandle;
+//        try {
+//            this.constructor = lookup.findConstructor(beanType, MethodType.methodType(Void.TYPE, constructor.getParameterTypes()));
+//        } catch (NoSuchMethodException ex) {
+//            throw new IllegalArgumentException("Unable to find constructor: " + beanType.getSimpleName());
+//        } catch (IllegalAccessException ex) {
+//            throw new IllegalArgumentException("Unable to access constructor: " + beanType.getSimpleName());
+//        }
         this.constructionData = buildConstructionData(constructor);
     }
 
@@ -128,11 +144,32 @@ public final class LightMetaBean<T extends Bean> implements MetaBean {
     }
 
     // finds constructor which matches types exactly
+    public static <T extends Bean> MethodHandle findConstructorHandle(Class<T> beanType, MethodHandles.Lookup lookup) {
+        Field[] fields = beanType.getDeclaredFields();
+        List<Class<?>> propertyTypes = new ArrayList<>();
+        for (Field field : fields) {
+            if (!Modifier.isStatic(field.getModifiers()) && field.getAnnotation(PropertyDefinition.class) != null) {
+                PropertyDefinition pdef = field.getAnnotation(PropertyDefinition.class);
+                if (!pdef.get().equals("")) {
+                    propertyTypes.add(field.getType());
+                }
+            }
+        }
+        Constructor<?> constructor = findConstructor(beanType, propertyTypes);
+        try {
+            return lookup.findConstructor(beanType, MethodType.methodType(Void.TYPE, constructor.getParameterTypes()));
+        } catch (NoSuchMethodException ex) {
+            throw new IllegalArgumentException("Unable to find constructor: " + beanType.getSimpleName());
+        } catch (IllegalAccessException ex) {
+            throw new IllegalArgumentException("Unable to access constructor: " + beanType.getSimpleName());
+        }
+    }
+
+    // finds constructor which matches types exactly
     private static <T extends Bean> Constructor<T> findConstructor(Class<T> beanType, List<Class<?>> propertyTypes) {
         Class<?>[] types = propertyTypes.toArray(new Class<?>[propertyTypes.size()]);
         try {
             Constructor<T> con = beanType.getDeclaredConstructor(types);
-            con.setAccessible(true);
             return con;
             
         } catch (NoSuchMethodException ex) {
@@ -159,7 +196,6 @@ public final class LightMetaBean<T extends Bean> implements MetaBean {
             if (match == null) {
                 throw new UnsupportedOperationException("Unable to find constructor: " + beanType.getSimpleName(), ex);
             }
-            match.setAccessible(true);
             return match;
         }
     }
@@ -192,31 +228,21 @@ public final class LightMetaBean<T extends Bean> implements MetaBean {
     }
 
     //-----------------------------------------------------------------------
+    @SuppressWarnings("unchecked")
     T build(Object[] args) {
         try {
-            return constructor.newInstance(args);
+            return (T) constructor.invokeWithArguments(args);
             
-        } catch (IllegalArgumentException ex) {
+        } catch (Throwable ex) {
             throw new IllegalArgumentException(
                     "Bean cannot be created: " + beanName() + " from " + args, ex);
-        } catch (IllegalAccessException ex) {
-            throw new UnsupportedOperationException(
-                    "Bean cannot be created: " + beanName() + " from " + args, ex);
-        } catch (InstantiationException ex) {
-            throw new UnsupportedOperationException(
-                    "Bean cannot be created: " + beanName() + " from " + args, ex);
-        } catch (InvocationTargetException ex) {
-            if (ex.getCause() instanceof RuntimeException) {
-                throw (RuntimeException) ex.getCause();
-            }
-            throw new RuntimeException(ex);
         }
     }
 
     //-----------------------------------------------------------------------
     @Override
     public BeanBuilder<T> builder() {
-        return new LightBeanBuilder<T>(this, constructionData.clone());
+        return new HandleBeanBuilder<>(this, constructionData.clone());
     }
 
     @Override
@@ -269,8 +295,8 @@ public final class LightMetaBean<T extends Bean> implements MetaBean {
     //-----------------------------------------------------------------------
     @Override
     public boolean equals(Object obj) {
-        if (obj instanceof LightMetaBean) {
-            LightMetaBean<?> other = (LightMetaBean<?>) obj;
+        if (obj instanceof HandleMetaBean) {
+            HandleMetaBean<?> other = (HandleMetaBean<?>) obj;
             return this.beanType.equals(other.beanType);
         }
         return false;

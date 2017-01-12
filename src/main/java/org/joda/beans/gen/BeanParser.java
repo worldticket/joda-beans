@@ -186,7 +186,7 @@ class BeanParser {
                     data.setConstructorStyle(CONSTRUCTOR_BY_BUILDER);
                 }
             } else {
-                if (data.isBeanStyleLight()) {
+                if (data.isBeanStyleLight() || data.isBeanStyleHandle()) {
                     data.setConstructorStyle(CONSTRUCTOR_BY_ARGS);
                 } else {
                     data.setConstructorStyle(CONSTRUCTOR_BY_BUILDER);

@@ -882,7 +882,7 @@ class PropertyData {
      */
     public void resolveBuilderGen() {
         if (getBean().isMutable()) {
-            if (!getBean().isBuilderScopeVisible() && !getBean().isBeanStyleLight()) {
+            if (!getBean().isBuilderScopeVisible() && !getBean().isBeanStyleLight() && !getBean().isBeanStyleHandle()) {
                 return;  // no builder
             }
         }
