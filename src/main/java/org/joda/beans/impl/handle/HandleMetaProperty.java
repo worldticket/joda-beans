@@ -211,7 +211,7 @@ final class HandleMetaProperty<P> extends BasicMetaProperty<P> {
     public P get(Bean bean) {
         try {
             return (P) getter.invokeExact(bean);
-        } catch (RuntimeException ex) {
+        } catch (RuntimeException | Error ex) {
             throw ex;
         } catch (Throwable ex) {
             throw new RuntimeException(ex);

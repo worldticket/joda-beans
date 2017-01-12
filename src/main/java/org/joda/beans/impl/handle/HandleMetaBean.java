@@ -67,6 +67,7 @@ public final class HandleMetaBean<T extends Bean> implements MetaBean {
      * @param <B>  the type of the bean
      * @param beanClass  the bean class, not null
      * @param lookup  the method handle lookup, not null
+     * @param constructorHandle  the constructor handle, not null
      * @return the meta-bean, not null
      */
     public static <B extends Bean> HandleMetaBean<B> of(
@@ -233,6 +234,8 @@ public final class HandleMetaBean<T extends Bean> implements MetaBean {
         try {
             return (T) constructor.invokeWithArguments(args);
             
+        } catch (Error ex) {
+            throw ex;
         } catch (Throwable ex) {
             throw new IllegalArgumentException(
                     "Bean cannot be created: " + beanName() + " from " + args, ex);
